@@ -25,8 +25,16 @@ merlin = { version = "^3.0" }
 [dev-dependencies]
 ark-bls12-381 = { version = "^0.3.0", default-features = false, features = ["curve"] }
 rand_chacha = "0.3"
+criterion = "0.5.1"
 
 [features]
 default = ["parallel"]
 std = ["ark-ff/std", "ark-ec/std", "ark-poly/std", "ark-groth16/std", "ark-relations/std", "ark-crypto-primitives/std", "ark-std/std" ]
 parallel = ["std", "ark-ff/parallel", "ark-poly/parallel", "ark-groth16/parallel", "ark-ec/parallel", "ark-crypto-primitives/parallel", "ark-std/parallel", "rayon"]
+
+[lib]
+bench = false
+
+[[bench]]
+name = "bench_aggregation"
+harness = false
