@@ -1,4 +1,5 @@
-[![CircleCI](https://circleci.com/gh/nikkolasg/snarkpack/tree/main.svg?style=svg)](https://circleci.com/gh/nikkolasg/snarkpack/tree/main)
+![example workflow](https://github.com/nikkolasg/snarkpack/actions/workflows/check.yml/badge.svg)
+
 
 # Snarpack on arkwork
 
