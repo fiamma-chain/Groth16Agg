@@ -1,12 +1,11 @@
 use crate::ip;
 use crate::Error;
-use ark_ec::{AffineCurve, PairingEngine, ProjectiveCurve};
-use ark_ff::{Field, PrimeField};
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, SerializationError};
+use ark_ec::{pairing::Pairing, AffineRepr, CurveGroup};
+use ark_ff::CyclotomicMultSubgroup;
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::{
     fmt::Debug,
-    io::{Read, Write},
-    ops::MulAssign,
+    ops::{AddAssign, MulAssign},
     vec::Vec,
 };
 use rayon::prelude::*;
@@ -40,7 +39,7 @@ use rayon::prelude::*;
 /// Key is a generic commitment key that is instanciated with g and h as basis,
 /// and a and b as powers.
 #[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize)]
-pub struct Key<G: AffineCurve> {
+pub struct Key<G: AffineRepr> {
     /// Exponent is a
     pub a: Vec<G>,
     /// Exponent is b
@@ -50,16 +49,16 @@ pub struct Key<G: AffineCurve> {
 /// Commitment key used by the "single" commitment on G1 values as
 /// well as in the "pair" commtitment.
 /// It contains $\{h^a^i\}_{i=1}^n$ and $\{h^b^i\}_{i=1}^n$
-pub type VKey<E> = Key<<E as PairingEngine>::G2Affine>;
+pub type VKey<E> = Key<<E as Pairing>::G2Affine>;
 
 /// Commitment key used by the "pair" commitment. Note the sequence of
 /// powers starts at $n$ already.
 /// It contains $\{g^{a^{n+i}}\}_{i=1}^n$ and $\{g^{b^{n+i}}\}_{i=1}^n$
-pub type WKey<E> = Key<<E as PairingEngine>::G1Affine>;
+pub type WKey<E> = Key<<E as Pairing>::G1Affine>;
 
 impl<G> Key<G>
 where
-    G: AffineCurve,
+    G: AffineRepr,
 {
     /// Returns true if commitment keys have the exact required length.
     /// It is necessary for the IPP scheme to work that commitment
@@ -81,8 +80,8 @@ where
             .zip(self.b.par_iter())
             .zip(s_vec.par_iter())
             .map(|((ap, bp), si)| {
-                let v1s = ap.mul(si.into_repr()).into_affine();
-                let v2s = bp.mul(si.into_repr()).into_affine();
+                let v1s = ap.mul(si).into_affine();
+                let v2s = bp.mul(si).into_affine();
                 (v1s, v2s)
             })
             .unzip();
@@ -121,10 +120,10 @@ where
             .zip(right.a.par_iter())
             .zip(right.b.par_iter())
             .map(|(((left_a, left_b), right_a), right_b)| {
-                let mut ra = right_a.mul(scale.into_repr());
-                let mut rb = right_b.mul(scale.into_repr());
-                ra.add_assign_mixed(left_a);
-                rb.add_assign_mixed(left_b);
+                let mut ra = right_a.mul(scale);
+                let mut rb = right_b.mul(scale);
+                ra.add_assign(left_a);
+                rb.add_assign(left_b);
                 (ra.into_affine(), rb.into_affine())
             })
             .unzip();
@@ -142,33 +141,36 @@ where
 
 /// Both commitment outputs a pair of $F_q^k$ element.
 #[derive(PartialEq, CanonicalSerialize, CanonicalDeserialize, Clone, Debug)]
-pub struct Output<F: Field + CanonicalSerialize + CanonicalDeserialize>(pub F, pub F);
+pub struct Output<F: CanonicalSerialize + CanonicalDeserialize + CyclotomicMultSubgroup>(
+    pub F,
+    pub F,
+);
 
 /// Commits to a single vector of G1 elements in the following way:
 /// $T = \prod_{i=0}^n e(A_i, v_{1,i})$
 /// $U = \prod_{i=0}^n e(A_i, v_{2,i})$
 /// Output is $(T,U)$
-pub fn single_g1<E: PairingEngine>(
+pub fn single_g1<E: Pairing>(
     vkey: &VKey<E>,
     a_vec: &[E::G1Affine],
-) -> Result<Output<E::Fqk>, Error> {
+) -> Result<Output<<E as Pairing>::TargetField>, Error> {
     try_par! {
         let a = ip::pairing::<E>(a_vec, &vkey.a),
         let b = ip::pairing::<E>(a_vec, &vkey.b)
     };
-    Ok(Output(a, b))
+    Ok(Output(a.0, b.0))
 }
 
 /// Commits to a tuple of G1 vector and G2 vector in the following way:
 /// $T = \prod_{i=0}^n e(A_i, v_{1,i})e(B_i,w_{1,i})$
 /// $U = \prod_{i=0}^n e(A_i, v_{2,i})e(B_i,w_{2,i})$
 /// Output is $(T,U)$
-pub fn pair<E: PairingEngine>(
+pub fn pair<E: Pairing>(
     vkey: &VKey<E>,
     wkey: &WKey<E>,
     a: &[E::G1Affine],
     b: &[E::G2Affine],
-) -> Result<Output<E::Fqk>, Error> {
+) -> Result<Output<<E as Pairing>::TargetField>, Error> {
     try_par! {
         // (A * v)
         let t1 = ip::pairing::<E>(a, &vkey.a),
@@ -177,11 +179,11 @@ pub fn pair<E: PairingEngine>(
         let u1 = ip::pairing::<E>(a, &vkey.b),
         let u2 = ip::pairing::<E>(&wkey.b, b)
     };
-    let mut t1 = t1;
-    let mut u1 = u1;
     // (A * v)(w * B)
-    t1.mul_assign(&t2);
-    u1.mul_assign(&u2);
+    let mut t1 = t1.0;
+    let mut u1 = u1.0;
+    t1.mul_assign(&t2.0);
+    u1.mul_assign(&u2.0);
     Ok(Output(t1, u1))
 }
 
@@ -190,6 +192,7 @@ mod tests {
     use super::*;
     use crate::srs::structured_generators_scalar_power;
     use ark_bls12_381::{Bls12_381 as Bls12, Fr, G1Projective, G2Projective};
+    use ark_ec::Group;
     use ark_std::UniformRand;
     use rand_core::SeedableRng;
 
@@ -197,7 +200,7 @@ mod tests {
     fn test_commit_single() {
         let n = 6;
         let mut rng = rand_chacha::ChaChaRng::seed_from_u64(0u64);
-        let h = G2Projective::prime_subgroup_generator();
+        let h = G2Projective::generator();
         let u = Fr::rand(&mut rng);
         let v = Fr::rand(&mut rng);
         let v1 = structured_generators_scalar_power(n, &h, &u);
@@ -220,8 +223,8 @@ mod tests {
     fn test_commit_pair() {
         let n = 6;
         let mut rng = rand_chacha::ChaChaRng::seed_from_u64(0u64);
-        let h = G2Projective::prime_subgroup_generator();
-        let g = G1Projective::prime_subgroup_generator();
+        let h = G2Projective::generator();
+        let g = G1Projective::generator();
         let u = Fr::rand(&mut rng);
         let v = Fr::rand(&mut rng);
         let v1 = structured_generators_scalar_power(n, &h, &u);

@@ -1,43 +1,44 @@
 use crate::Error;
-use ark_ec::{msm::VariableBaseMSM, AffineCurve, PairingEngine};
-use ark_ff::PrimeField;
-use ark_std::{cfg_iter, vec::Vec};
-use rayon::prelude::*;
+use ark_ec::{
+    pairing::{MillerLoopOutput, Pairing, PairingOutput},
+    AffineRepr, VariableBaseMSM,
+};
+use ark_std::vec::Vec;
 
-pub(crate) fn pairing_miller_affine<E: PairingEngine>(
+pub(crate) fn pairing_miller_affine<E: Pairing>(
     left: &[E::G1Affine],
     right: &[E::G2Affine],
-) -> Result<E::Fqk, Error> {
+) -> Result<MillerLoopOutput<E>, Error> {
     if left.len() != right.len() {
         return Err(Error::InvalidIPVectorLength);
     }
-    let pairs: Vec<(E::G1Prepared, E::G2Prepared)> = left
-        .par_iter()
+    let left = left
+        .iter()
         .map(|e| E::G1Prepared::from(*e))
-        .zip(right.par_iter().map(|e| E::G2Prepared::from(*e)))
+        .collect::<Vec<_>>();
+    let right = right
+        .iter()
+        .map(|e| E::G2Prepared::from(*e))
         .collect::<Vec<_>>();
 
-    Ok(E::miller_loop(pairs.iter()))
+    Ok(E::multi_miller_loop(left, right))
 }
 
 /// Returns the miller loop result of the inner pairing product
-pub(crate) fn pairing<E: PairingEngine>(
+pub(crate) fn pairing<E: Pairing>(
     left: &[E::G1Affine],
     right: &[E::G2Affine],
-) -> Result<E::Fqk, Error> {
-    E::final_exponentiation(&pairing_miller_affine::<E>(left, right)?).ok_or(Error::InvalidPairing)
+) -> Result<PairingOutput<E>, Error> {
+    let miller_result = pairing_miller_affine::<E>(left, right)?;
+    E::final_exponentiation(miller_result).ok_or(Error::InvalidPairing)
 }
 
-pub(crate) fn multiexponentiation<G: AffineCurve>(
+pub(crate) fn multiexponentiation<G: AffineRepr>(
     left: &[G],
     right: &[G::ScalarField],
-) -> Result<G::Projective, Error> {
+) -> Result<G::Group, Error> {
     if left.len() != right.len() {
-        return Err(Error::InvalidIPVectorLength);
+        return Err(Error::InvalidPairing);
     }
-
-    Ok(VariableBaseMSM::multi_scalar_mul(
-        left,
-        &cfg_iter!(right).map(|s| s.into_repr()).collect::<Vec<_>>(),
-    ))
+    VariableBaseMSM::msm(left, right).map_err(|_| Error::InvalidIPVectorLength)
 }

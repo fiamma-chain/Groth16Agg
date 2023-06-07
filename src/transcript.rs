@@ -1,5 +1,5 @@
 use ark_ff::fields::Field;
-use ark_serialize::CanonicalSerialize;
+use ark_serialize::{CanonicalSerialize, Compress};
 use merlin::Transcript as Merlin;
 
 /// must be specific to the application.
@@ -22,8 +22,10 @@ impl Transcript for Merlin {
     }
 
     fn append<S: CanonicalSerialize>(&mut self, label: &'static [u8], element: &S) {
-        let mut buff: Vec<u8> = vec![0; element.serialized_size()];
-        element.serialize(&mut buff).expect("serialization failed");
+        let mut buff: Vec<u8> = vec![0; element.serialized_size(Compress::Yes)];
+        element
+            .serialize_compressed(&mut buff)
+            .expect("serialization failed");
         self.append_message(label, &buff);
     }
 
@@ -56,15 +58,15 @@ impl Transcript for Merlin {
 mod test {
     use super::*;
     use ark_bls12_381::{Fr, G1Projective};
-    use ark_ec::ProjectiveCurve;
+    use ark_ec::Group;
 
     #[test]
     fn transcript() {
         let mut transcript = new_merlin_transcript(b"test");
-        transcript.append(b"point", &G1Projective::prime_subgroup_generator());
+        transcript.append(b"point", &G1Projective::generator());
         let f1 = transcript.challenge_scalar::<Fr>(b"scalar");
         let mut transcript2 = new_merlin_transcript(b"test");
-        transcript2.append(b"point", &G1Projective::prime_subgroup_generator());
+        transcript2.append(b"point", &G1Projective::generator());
         let f2 = transcript2.challenge_scalar::<Fr>(b"scalar");
         assert_eq!(f1, f2);
     }
