@@ -57,7 +57,7 @@ impl Transcript for Merlin {
 #[cfg(test)]
 mod test {
     use super::*;
-    use ark_bls12_381::{Fr, G1Projective};
+    use ark_bn254::{Fr, G1Projective};
     use ark_ec::Group;
 
     #[test]

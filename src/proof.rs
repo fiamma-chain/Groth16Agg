@@ -360,20 +360,20 @@ mod tests {
     use super::*;
 
     use crate::commitment::Output as O;
-    use ark_bls12_381::{Bls12_381 as Bls12, G1Affine, G2Affine};
+    use ark_bn254::{Bn254, G1Affine, G2Affine};
 
-    fn fake_proof() -> AggregateProof<Bls12> {
+    fn fake_proof() -> AggregateProof<Bn254> {
         // create pairing, as pairing results can be compressed
         let p = G1Affine::generator();
         let q = G2Affine::generator();
-        let a = Bls12::pairing(p, q);
+        let a = Bn254::pairing(p, q);
 
-        let proof = AggregateProof::<Bls12> {
+        let proof = AggregateProof::<Bn254> {
             com_ab: O(a.0, a.0),
             com_c: O(a.0, a.0),
             ip_ab: a.0,
             agg_c: G1Affine::generator(),
-            tmipp: TippMippProof::<Bls12> {
+            tmipp: TippMippProof::<Bn254> {
                 gipa: GipaProof {
                     nproofs: 4,
                     comms_ab: vec![(O(a.0, a.0), O(a.0, a.0)), (O(a.0, a.0), O(a.0, a.0))],
@@ -401,7 +401,7 @@ mod tests {
         let proof = fake_proof();
         let mut buffer = Vec::new();
         proof.write(&mut buffer).unwrap();
-        let out = AggregateProof::<Bls12>::read(std::io::Cursor::new(&buffer)).unwrap();
+        let out = AggregateProof::<Bn254>::read(std::io::Cursor::new(&buffer)).unwrap();
         assert_eq!(proof, out);
     }
 
@@ -409,7 +409,7 @@ mod tests {
     fn test_proof_check() {
         let p = G1Affine::generator();
         let q = G2Affine::generator();
-        let a = Bls12::pairing(p, q);
+        let a = Bn254::pairing(p, q);
 
         let mut proof = fake_proof();
         proof.parsing_check().expect("proof should be valid");
